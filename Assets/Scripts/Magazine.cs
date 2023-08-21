@@ -22,7 +22,6 @@ public class Magazine : XRGrabInteractable
     }
 
     // Private members
-    public bool CanBeLoaded = true; // Set this to true upon grabbing the mag. It is only set to false when ejecting and releasing the mag from a gun.
     public bool WasReleasedFromGun = false;
 
     public int HeldRounds
@@ -61,12 +60,12 @@ public class Magazine : XRGrabInteractable
     /// <param name="args"></param>
     protected override void OnSelectEntered(SelectEnterEventArgs args)
     {
-        base.OnSelectEntered(args);
-
+        Debug.Log("Grabbed magazine.");
         // Currently, there is no need to check if the mag was released from a gun or not as these settings should be universal for all mags upon being grabbed.
-        GetComponent<Rigidbody>().isKinematic = false;
+        GetComponent<Rigidbody>().constraints = RigidbodyConstraints.None;
         transform.parent = null;    // Unparent from GunMagazineReleasePoint
-        CanBeLoaded = true;
+
+        base.OnSelectEntered(args);
     }
 
     public void ImportData(MagazineInfo magazineInfo)

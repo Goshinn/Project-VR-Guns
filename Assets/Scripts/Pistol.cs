@@ -10,22 +10,17 @@ public class Pistol : XRGrabInteractable
 {
     [Header("Settings")]
     [SerializeField] private float m_CartridgeEjectionPower = 20f;      // Used for ejecting rounds with bullets & propellant still intact. 
-    [SerializeField] private float m_MagazineEjectionPower = 25f;
     [SerializeField] private Vector3 m_CartridgeEjectionRotationOffset = new Vector3(90f, 0, 0);
 
-    [Header("Model References")]
-    [SerializeField] private GameObject m_MagazineModel;
+    [Header("Component References")]
+    [SerializeField] private MagazineWell m_MagazineWell;
 
     [Header("Location References")]
     [SerializeField] private Transform m_BulletSpawnPoint;
     [SerializeField] private Transform m_CartridgeEjectionPoint;
-    [SerializeField] private Transform m_MagazineEjectionPoint;
-    [SerializeField] private Transform m_MagazineEjectionDirection;
-    [SerializeField] private Transform m_MagazineReleasePoint;
 
     [Header("Prefab References")]
-    [SerializeField] private GameObject m_CartridgePrefab;
-    [SerializeField] private GameObject m_MagazinePrefab;
+    [SerializeField] private GameObject m_CartridgePrefab;              // Prefab of the round with bullet intact. (not round casing)
 
     [Header("Particle System References")]
     [SerializeField] private ParticleSystem m_MuzzleFlashVFX;
@@ -34,24 +29,15 @@ public class Pistol : XRGrabInteractable
     [Header("SFX")]
     [SerializeField] private AudioClip m_SFXGunShot;
     [SerializeField] private AudioClip m_SFXEmptyClick;
-    [SerializeField] private AudioClip m_SFXInsertMagazine;
-    [SerializeField] private AudioClip m_SFXReleaseMagazine;
 
     // Private component references
     private Animator m_Animator;
     private AudioSource m_AudioSource;
     private MyActionBasedController m_Controller;
 
-    [Header("Private members")]
-    /// <summary>
-    /// True if player is holding onto this pistol and false if not.
-    /// NOTE: I don't think this is the best way to handle the usage of this object but it'll do for now...
-    /// </summary>
-    private bool m_HasInsertedMagazine;
-    private Magazine.MagazineInfo m_MagazineInfo;
+    // Private members
     private bool m_HasRoundInChamber;
 
-    public Magazine.MagazineInfo GetMagazineInfo() { return m_MagazineInfo; }
     public bool HasRoundInChamber { get { return m_HasRoundInChamber; } }
 
     override protected void Awake()
@@ -59,40 +45,6 @@ public class Pistol : XRGrabInteractable
         base.Awake();
         m_Animator = GetComponent<Animator>();
         m_AudioSource = GetComponent<AudioSource>();
-
-        m_MagazineModel.SetActive(m_HasInsertedMagazine);
-    }
-
-    private void OnTriggerEnter(Collider other)
-    {
-        // If there is no loaded magazine and a mag is detected, load it into the pistol.
-        if (!m_HasInsertedMagazine)
-        {
-            Magazine detectedMagazine = other.GetComponent<Magazine>();
-            if (detectedMagazine != null && detectedMagazine.CanBeLoaded && !detectedMagazine.WasReleasedFromGun)
-            {
-                Debug.Log("Detected magazine. Triggering load mag anim...");
-                m_MagazineInfo = detectedMagazine.GetMagazineInfo();
-
-                // Play load magazine animation (which plays load mag sfx via anim event)
-                m_Animator.SetTrigger("LoadMagazine");
-                m_MagazineModel.SetActive(true);
-                Destroy(other.gameObject);
-            }
-        }
-    }
-
-    private void OnTriggerExit(Collider other)
-    {
-        if (!m_HasInsertedMagazine)
-        {
-            Magazine detectedMagazine = other.GetComponent<Magazine>();
-            if (detectedMagazine != null && detectedMagazine.WasReleasedFromGun)
-            {
-                Debug.Log("Setting mag was released from gun...");
-                detectedMagazine.WasReleasedFromGun = false;
-            }
-        }
     }
 
     protected override void OnSelectEntered(SelectEnterEventArgs args)
@@ -104,8 +56,8 @@ public class Pistol : XRGrabInteractable
         if (m_Controller != null)
         {
             // Subscribing to input events...
-            m_Controller.primaryButtonTap.action.performed += context => EjectMagazine();
-            m_Controller.primaryButtonLongPress.action.performed += context => ReleaseMagazine();
+            m_Controller.primaryButtonTap.action.performed += context => AttemptEjectMagazine();
+            m_Controller.primaryButtonLongPress.action.performed += context => AttemptReleaseMagazine();
         }
     }
 
@@ -116,19 +68,9 @@ public class Pistol : XRGrabInteractable
         if (m_Controller != null)
         {
             // Unsubscribing to input events...
-            m_Controller.primaryButtonTap.action.performed -= context => EjectMagazine();
-            m_Controller.primaryButtonLongPress.action.performed -= context => ReleaseMagazine();
+            m_Controller.primaryButtonTap.action.performed -= context => AttemptEjectMagazine();
+            m_Controller.primaryButtonLongPress.action.performed -= context => AttemptReleaseMagazine();
         }
-    }
-
-    public override void ProcessInteractable(XRInteractionUpdateOrder.UpdatePhase updatePhase)
-    {
-        base.ProcessInteractable(updatePhase);
-
-        //if (updatePhase == XRInteractionUpdateOrder.UpdatePhase.Dynamic)
-        //{
-            
-        //}
     }
 
     public void PullTrigger(ActivateEventArgs args)
@@ -136,9 +78,9 @@ public class Pistol : XRGrabInteractable
         if (m_HasRoundInChamber)
         {
             // If the magazine still has rounds, chamber it
-            if (m_HasInsertedMagazine && m_MagazineInfo.HeldRounds > 0)
+            if (m_MagazineWell.HasInsertedMagazine && m_MagazineWell.MagazineInfo.HeldRounds > 0)
             {
-                --m_MagazineInfo.HeldRounds;
+                m_MagazineWell.DeductRoundFromMagazine();
                 m_HasRoundInChamber = true;
             }
             else
@@ -151,10 +93,11 @@ public class Pistol : XRGrabInteractable
             m_AudioSource.PlayOneShot(m_SFXGunShot);
             if (m_MuzzleFlashVFX)
             {
+                //m_MuzzleFlashVFX.Emit((int)m_MuzzleFlashVFX.emission.GetBurst(0).count.constant);
                 m_MuzzleFlashVFX.Stop();
                 m_MuzzleFlashVFX.Play();
             }
-            m_Controller.SendHapticImpulse(1f, 0.5f);
+            m_Controller.SendHapticImpulse(1f, 0.1f);
 
             // Play animation of the slide/bolt moving rearwards from recoil and then moving back to position
             m_Animator.SetTrigger("Fire");
@@ -175,9 +118,8 @@ public class Pistol : XRGrabInteractable
     /// Removes the round in the chamber and spawns the bullet as a gameobject, ejecting it from the pistol.
     /// Bullets despawn after x seconds.
     /// </summary>
-    public void EjectBullet()
+    public void ClearRoundInChamber()
     {
-        //Debug.Log("Ejecting bullet...");
         m_HasRoundInChamber = false;
 
         // Cancels function if ejection slot hasn't been set or there's no casing
@@ -187,11 +129,11 @@ public class Pistol : XRGrabInteractable
             return;
         }
 
-        // Create the casing
-        GameObject ejectedBullet = Instantiate<GameObject>(m_CartridgePrefab, m_CartridgeEjectionPoint.position, m_CartridgeEjectionPoint.rotation);
-        ejectedBullet.transform.Rotate(m_CartridgeEjectionRotationOffset);  // By right, all models stand upright, including shell casings. To orient correctly, apply the rotation offset.
+        // Create the cartridge
+        GameObject ejectedCartridge = Instantiate<GameObject>(m_CartridgePrefab, m_CartridgeEjectionPoint.position, m_CartridgeEjectionPoint.rotation);
+        ejectedCartridge.transform.Rotate(m_CartridgeEjectionRotationOffset);  // By right, all models stand upright, including shell casings. To orient correctly, apply the rotation offset.
         // Add force on casing to push it out
-        Rigidbody bulletRB = ejectedBullet.GetComponent<Rigidbody>();
+        Rigidbody bulletRB = ejectedCartridge.GetComponent<Rigidbody>();
         bulletRB.AddExplosionForce(UnityEngine.Random.Range(m_CartridgeEjectionPower * 0.7f, m_CartridgeEjectionPower),
                                         (m_CartridgeEjectionPoint.position - m_CartridgeEjectionPoint.right * 0.3f - m_CartridgeEjectionPoint.up * 0.6f),
                                         1f);
@@ -199,7 +141,7 @@ public class Pistol : XRGrabInteractable
         bulletRB.AddTorque(new Vector3(0, UnityEngine.Random.Range(100f, 500f), UnityEngine.Random.Range(100f, 1000f)), ForceMode.Impulse);
 
         // Destroy casing after X seconds
-        Destroy(ejectedBullet, 60f);
+        Destroy(ejectedCartridge, 60f);
     }
 
     /// <summary>
@@ -214,93 +156,29 @@ public class Pistol : XRGrabInteractable
         }
     }
 
-    /// <summary>
-    /// Release the mag from the pistol but do not eject. (like in "Into the Radius")
-    /// The magazine should then be grabbable. Grabbing it allows the player to inspect the number of rounds left in the mag.
-    /// </summary>
-    private void ReleaseMagazine()
-    {
-        // Theres no mag to release if no mag is inserted.
-        if (!m_HasInsertedMagazine)
-        {
-            return;
-        }
-
-        // Play release mag anim and sfx
-        m_Animator.SetTrigger("ReleaseMagazine");
-        m_AudioSource.PlayOneShot(m_SFXReleaseMagazine);
-    }
-
-    public void SpawnReleasedMagazine()
-    {
-        Debug.Log("Spawning released mag...");
-        // Spawn magazine, initialize its data and set to kinematic
-        Magazine releasedMagazine = Instantiate(m_MagazinePrefab, m_MagazineReleasePoint).GetComponent<Magazine>();
-        releasedMagazine.ImportData(m_MagazineInfo);
-        releasedMagazine.GetComponent<Rigidbody>().isKinematic = true;
-        releasedMagazine.transform.localScale = Vector3.one;
-        releasedMagazine.CanBeLoaded = false;
-        releasedMagazine.WasReleasedFromGun = true;
-        releasedMagazine.name = "ReleasedMagazine";
-
-        m_MagazineModel.SetActive(false);
-        m_HasInsertedMagazine = false;
-    }
-
-    /// <summary>
-    /// Spawn the ejected magazine at the mag ejection location in the correct orientation,
-    /// then add force in the ejection direction.
-    /// </summary>
-    /// <param name="context"></param>
-    public void EjectMagazine()
-    {
-        // Theres nothing to eject if theres no magazine loaded.
-        if (!m_HasInsertedMagazine)
-        {
-            return;
-        }
-
-        // Play release mag sfx
-        m_AudioSource.PlayOneShot(m_SFXReleaseMagazine);
-
-        // Spawn magazine, initialize its data and add force
-        Magazine ejectedMagazine = Instantiate(m_MagazinePrefab, m_MagazineEjectionPoint.position, m_MagazineEjectionPoint.rotation).GetComponent<Magazine>();
-        ejectedMagazine.ImportData(m_MagazineInfo);
-        ejectedMagazine.CanBeLoaded = false;
-        ejectedMagazine.GetComponent<Rigidbody>().AddForce(m_MagazineEjectionDirection.forward * m_MagazineEjectionPower);
-        Physics.IgnoreCollision(ejectedMagazine.GetComponent<MeshCollider>(), GetComponentInChildren<BoxCollider>());
-        // After x seconds, enable collision between grip collider and ejectedMag collider (or on trigger exit?)
-
-        // Update this pistol to reflect the changes
-        m_HasInsertedMagazine = false;
-        m_MagazineModel.SetActive(false);
-    }
-
-    private void InsertMagazine()
-    {
-        Debug.Log($"Inserted mag with {m_MagazineInfo.HeldRounds} bullets.");
-        m_MagazineModel.SetActive(true);
-        m_AudioSource.PlayOneShot(m_SFXInsertMagazine);
-        m_HasInsertedMagazine = true;
-    }
-
-    /// <summary>
-    /// Call this once the released magazine is grabbed.
-    /// </summary>
-    public void HideMagazineModel()
-    {
-        m_MagazineModel.SetActive(false);
-    }
-
     public void AttemptChamberBullet()
     {
-        if (m_HasInsertedMagazine && m_MagazineInfo.HeldRounds > 0)
+        if (m_MagazineWell.HasInsertedMagazine && m_MagazineWell.MagazineInfo.HeldRounds > 0)
         {
-            --m_MagazineInfo.HeldRounds;
+            m_MagazineWell.DeductRoundFromMagazine();
             m_HasRoundInChamber = true;
         }
 
         Debug.Log($"AttemptChamberBullet(): Set animator param [HasRoundInChamber] to {m_HasRoundInChamber}...");
         m_Animator.SetBool("HasRoundInChamber", m_HasRoundInChamber);
     }
+
+
+    /* -------------------------- WRAPPER FUNCTIONS -------------------------- */
+    // Binded to primary button long press
+    public void AttemptReleaseMagazine() { m_MagazineWell.AttemptReleaseMagazine(); }
+
+    // Binded to primary button tap
+    public void AttemptEjectMagazine() { m_MagazineWell.AttemptEjectMagazine(); }
+
+    // Called via anim evnt when magazine has been fully released.
+    public void SpawnReleasedMagazine() { m_MagazineWell.SpawnReleasedMagazine(); }
+
+    // Called via anim evnt when mag has been fully inserted.
+    public void InsertMagazine() { m_MagazineWell.InsertMagazine(); }
 }

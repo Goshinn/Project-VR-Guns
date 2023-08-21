@@ -148,7 +148,7 @@ namespace Unity.XRContent.Interaction
                 
                 if (m_Pistol.HasRoundInChamber && !m_HasEjectedCasing)
                 {
-                    m_Pistol.EjectBullet();
+                    m_Pistol.ClearRoundInChamber();
                     m_HasEjectedCasing = true;
                 }
             }
