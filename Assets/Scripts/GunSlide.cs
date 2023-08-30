@@ -45,6 +45,7 @@ namespace Unity.XRContent.Interaction
         [Header("Private References")]
         private Pistol m_Pistol;
         IXRSelectInteractor m_Interactor;
+        private Vector3 m_GrabStartLocalPosition;
         private AudioSource m_AudioSource;
 
         [Header("Private Members")]
@@ -105,6 +106,7 @@ namespace Unity.XRContent.Interaction
         {
             GetComponentInParent<Animator>().enabled = false;
             m_Interactor = args.interactorObject;
+            m_GrabStartLocalPosition = transform.InverseTransformPoint(m_Interactor.transform.position);
             UpdateSliderPosition();
         }
 
@@ -176,7 +178,7 @@ namespace Unity.XRContent.Interaction
         void UpdateSliderPosition()
         {
             // Put anchor position into slider space
-            var localPosition = transform.InverseTransformPoint(m_Interactor.GetAttachTransform(this).position);
+            var localPosition = transform.InverseTransformPoint(m_Interactor.transform.position) - m_GrabStartLocalPosition;
             var sliderValue = Mathf.Clamp01((localPosition.z - m_MinPosition) / (m_MaxPosition - m_MinPosition));
             SetValue(sliderValue);
             SetSliderPosition(sliderValue);

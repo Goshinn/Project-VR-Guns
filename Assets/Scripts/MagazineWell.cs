@@ -6,7 +6,7 @@ using static Magazine;
 public class MagazineWell : MonoBehaviour
 {
     [Header("Settings")]
-    [SerializeField] private float m_MagazineEjectionPower = 25f;
+    [SerializeField] private float m_MagazineEjectionPower = 10f;
 
     [Header("Model References")]
     [SerializeField] private GameObject m_MagazineModel;        // The visual gameobject used for animating mag release and insertion
